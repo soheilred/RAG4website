@@ -73,7 +73,7 @@ def scrape_to_file(file_path):
     with open(file_path, 'w', encoding='utf-8') as f:
         print(f"Starting crawl. Saving to {file_path}...")
         
-        while to_visit and count < 100: # Adjust limit as needed
+        while to_visit and count < 200: # Adjust limit as needed
             current_url = to_visit.pop(0)
             if current_url in visited: continue
             

@@ -79,29 +79,29 @@ def ask():
 
 if __name__ == "__main__":
 
-    test_queries = [
-        "What does eluvio do?",
-        "What is the difference between a Validator Node and a Content Node in the Eluvio Fabric?",
-        "What role does the Key Service (KMS) node play in content security?",
-        "What are the hardware requirements (CPU and RAM) for running a Full Fabric Node?",
-        "Explain the relationship between a Title Master and a Title Mezzanine object.",
-        "What is an 'Offering' in the context of an Eluvio Mezzanine, and what does it configure?",
-        "Does the Content Fabric store pre-generated files for every resolution, or is transcoding done on-the-fly?",
-        "How does Eluvio use proxy re-encryption to protect content from the infrastructure?",
-        "What are the fees and royalties structure for secondary NFT sales in an Eluvio Marketplace?",
-        "What happens to an NFT's special operations (like opening a pack) if it is transferred to Ethereum or Polygon?"
-        ]
+    # test_queries = [
+    #     "What does eluvio do?",
+    #     "What is the difference between a Validator Node and a Content Node in the Eluvio Fabric?",
+    #     "What role does the Key Service (KMS) node play in content security?",
+    #     "What are the hardware requirements (CPU and RAM) for running a Full Fabric Node?",
+    #     "Explain the relationship between a Title Master and a Title Mezzanine object.",
+    #     "What is an 'Offering' in the context of an Eluvio Mezzanine, and what does it configure?",
+    #     "Does the Content Fabric store pre-generated files for every resolution, or is transcoding done on-the-fly?",
+    #     "How does Eluvio use proxy re-encryption to protect content from the infrastructure?",
+    #     "What are the fees and royalties structure for secondary NFT sales in an Eluvio Marketplace?",
+    #     "What happens to an NFT's special operations (like opening a pack) if it is transferred to Ethereum or Polygon?"
+    #     ]
 
-    print("\n--- Running Startup Test Queries ---")
-    for q in test_queries:
-        try:
-            # We call the handler directly to test the full pipeline
-            # Note: Using 'query: ' prefix if you used the E5 model
-            response = ask_agent(f"query: {q}") 
-            print(f"PASS\nresponse: {response}")
-        except Exception as e:
-            print(f"FAIL | Query: {q} | Error: {e}")
+    # print("\n--- Running Startup Test Queries ---")
+    # for q in test_queries:
+    #     try:
+    #         # We call the handler directly to test the full pipeline
+    #         # Note: Using 'query: ' prefix if you used the E5 model
+    #         response = ask_agent(f"query: {q}") 
+    #         print(f"PASS\nresponse: {response}")
+    #     except Exception as e:
+    #         print(f"FAIL | Query: {q} | Error: {e}")
     
-    print("--- ✅ Tests Complete. Starting Server... ---\n")
+    # print(" Tests Complete. Starting Server... \n")
 
     app.run(host="127.0.0.1", port=5000)
