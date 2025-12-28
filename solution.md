@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 ### Build the Local Index
 
-Run the indexing script. This will scrape the Eluvio public site, process the data into semantic chunks, and build the local vector database in the `eluvio_vector_db` directory:
+Run the indexing script. This will scrape the Eluvio public site, process the data into semantic chunks, and build the local vector database in the `DB_VEC` directory:
 
 ```bash
 python index.py
