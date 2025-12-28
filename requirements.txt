@@ -1,6 +1,22 @@
-Flask
-beautifulsoup4
-langchain
-langchain-community
-chromadb
+# Web Framework & API
+Flask==3.1.2
+
+# LLM & RAG Orchestration
+langchain-core==1.2.5
+langchain-huggingface==1.2.0
+langchain-chroma==1.1.0
+langchain-text-splitters==1.1.0
+ollama==0.6.1
+
+# Web Scraping
+requests==2.32.5
+beautifulsoup4==4.14.3
+
+# Search & Indexing (Keyword)
+Whoosh==2.7.5
+
+# Vector Database Support
+chromadb==1.4.0
+
+# Dependencies for Local Embeddings
 sentence-transformers
