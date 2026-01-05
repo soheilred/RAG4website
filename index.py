@@ -1,6 +1,9 @@
 import os
 import requests
 import json
+import time
+from urllib.parse import urljoin, urlparse
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 from whoosh.index import create_in, open_dir
 from whoosh.fields import Schema, TEXT, ID
@@ -12,50 +15,91 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from constants import *
+import fitz  # PyMuPDF
 
+MAX_PAGES = 500  # Adjust as needed
 
-def create_db(data_dir, db_file):
-    # 1. Load the data from your JSONL file
-    print(f"Loading data from {data_dir}...")
-    documents = []
-    with open(data_dir, 'r', encoding='utf-8') as f:
-        for line in f:
-            data = json.loads(line)
-            # We wrap the content in a LangChain Document object
-            documents.append(Document(
-                page_content=data['content'],
-                metadata={"title": data['title'], "url": data['url']}
-            ))
+def extract_pdf_text(url):
+    """Downloads PDF and extracts text."""
+    if not os.path.exists(PDF_DIR): os.makedirs(PDF_DIR)
+    path = os.path.join(PDF_DIR, url.split('/')[-1])
+    try:
+        with requests.get(url, timeout=10) as r:
+            with open(path, 'wb') as f: f.write(r.content)
+        text = ""
+        with fitz.open(path) as doc:
+            for page in doc: text += page.get_text()
+        return text
+    except Exception as e:
+        print(f"PDF Error {url}: {e}")
+        return ""
 
-    # 2. Chunking (600 characters with 100 overlap is ideal for technical docs)
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=600,
-                                                   chunk_overlap=100)
-    chunks = text_splitter.split_documents(documents)
-    print(f"Split into {len(chunks)} chunks.")
+def should_scrape(url):
+    parsed = urlparse(url)
+    clean_url = url.split('#')[0].rstrip('/').lower()
+    
+    # 1. NEW: Check if any banned substring exists in the URL
+    if any(substring in clean_url for substring in BANNED_SUBSTRINGS):
+        print(f"Bypassing banned URL pattern: {url}")
+        return False
+        
+    # 2. Check domain (include subdomains like docs)
+    is_eluvio = parsed.netloc == BASE_URL or parsed.netloc.endswith("." + BASE_URL)
+    
+    # 3. Check for binary file extensions
+    is_binary_file = parsed.path.lower().endswith(SKIP_EXTENSIONS)
+    
+    return is_eluvio and not is_binary_file
 
-    # 3. Setup BGE-M3 using the new LangChain-HuggingFace class
-    print(f"Initializing {EMBEDDING_MODEL}...")
-    model_kwargs = {'device': 'cuda'} # Use 'cuda' if you have a GPU
-    encode_kwargs = {'normalize_embeddings': True}
+def scrape_eluvio(jsonfile):
+    visited = set()
+    to_visit = START_URLS.copy()
+    count = 0
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL,
-        model_kwargs=model_kwargs,
-        encode_kwargs=encode_kwargs,
-        # NOTE: BGE-M3 works best in LangChain with an empty query instruction
-        # query_encoder_kwargs={"instruction": ""} 
-    )
+    with sync_playwright() as p:
+        # Launch browser - headless=True for background, False to debug
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={'width': 1280, 'height': 800})
+        # page.set_extra_http_headers({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"})
 
-    # 4. Create the Vector DB
-    print("Creating local Vector Database...")
-    vector_db = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=db_file
-    )
-    print(f"Vector Database created and saved to {db_file}")
-    return vector_db
+        with open(jsonfile, 'w', encoding='utf-8') as f:
+            while to_visit and count < MAX_PAGES:
+                url = to_visit.pop(0).split('#')[0].rstrip('/')
+                # Check if we've been here OR if it's a banned/invalid link
+                if url in visited:
+                    continue
+                
+                if not should_scrape(url):
+                    # ADDED: Mark it as visited even if we don't scrape it
+                    visited.add(url)
+                    continue
+                
+                print(f"[{count+1}] Processing: {url}")
 
+                try:
+                    if url.lower().endswith('.pdf'):
+                        content = extract_pdf_text(url)
+                        title = f"PDF: {url.split('/')[-1]}"
+                    else:
+                        # Use networkidle to ensure JS hydration is complete
+                        page.goto(url, wait_until="networkidle", timeout=10000)
+                        title, content = page.title(), page.inner_text('body')
+
+                        # Piercing Shadow DOM to find links
+                        raw_links = page.locator('a[href]').evaluate_all("els => els.map(el => el.href)")
+                        for link in raw_links:
+                            full_url = urljoin(url, link).split('#')[0].rstrip('/')
+                            if full_url not in visited and should_scrape(full_url):
+                                to_visit.append(full_url)
+
+                    f.write(json.dumps({"title": title, "url": url, "content": content.strip()}) + "\n")
+                    visited.add(url)
+                    count += 1
+                except Exception as e:
+                    print(f"Skipped {url}: {e}")
+
+        browser.close()
+    print(f"Done! Saved {count} pages to {OUTPUT_FILE}")
 
 def scrape_to_file(file_path):
     # Define the schema for our searchable index
@@ -111,6 +155,49 @@ def scrape_to_file(file_path):
 
     print("Scraping finished.")
 
+
+
+def create_db(data_dir, db_file):
+    # 1. Load the data from your JSONL file
+    print(f"Loading data from {data_dir}...")
+    documents = []
+    with open(data_dir, 'r', encoding='utf-8') as f:
+        for line in f:
+            data = json.loads(line)
+            # We wrap the content in a LangChain Document object
+            documents.append(Document(
+                page_content=data['content'],
+                metadata={"title": data['title'], "url": data['url']}
+            ))
+
+    # 2. Chunking (600 characters with 100 overlap is ideal for technical docs)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=600,
+                                                   chunk_overlap=100)
+    chunks = text_splitter.split_documents(documents)
+    print(f"Split into {len(chunks)} chunks.")
+
+    # 3. Setup BGE-M3 using the new LangChain-HuggingFace class
+    print(f"Initializing {EMBEDDING_MODEL}...")
+    model_kwargs = {'device': 'cuda'} # Use 'cuda' if you have a GPU
+    encode_kwargs = {'normalize_embeddings': True}
+
+    embeddings = HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL,
+        model_kwargs=model_kwargs,
+        encode_kwargs=encode_kwargs,
+        # NOTE: BGE-M3 works best in LangChain with an empty query instruction
+        # query_encoder_kwargs={"instruction": ""} 
+    )
+
+    # 4. Create the Vector DB
+    print("Creating local Vector Database...")
+    vector_db = Chroma.from_documents(
+        documents=chunks,
+        embedding=embeddings,
+        persist_directory=db_file
+    )
+    print(f"Vector Database created and saved to {db_file}")
+    return vector_db
 
 
 def generate_phrase():
@@ -185,10 +272,11 @@ def cosine_similarity(a, b):
     return dot_product / (norm_a * norm_b)
 
 if __name__ == "__main__":
-    if not os.path.exists(JSONFILE):
-        scrape_to_file(JSONFILE)
-    else:
-        print(f"{OUTPUT_FILE} already exists. Skipping scrape.")
+    # if not os.path.exists(JSONFILE):
+        # scrape_to_file(JSONFILE)
+    scrape_eluvio(JSONFILE)
+    # else:
+        # print(f"{OUTPUT_FILE} already exists. Skipping scrape.")
 
     vector_db = create_db(JSONFILE, DB_FILE)
 

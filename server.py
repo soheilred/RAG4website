@@ -32,40 +32,121 @@ app = Flask(__name__)
 
 def ask_agent(prompt: str) -> str:
     """
-    Handler for returning a response from the agent.
-
-    TODO: YOUR CODE HERE
+    Hybrid RAG handler with query routing
     """
-    results = vector_db.similarity_search_with_score(prompt, k=5)
-    stream = augment_llm(prompt, results)
 
-    # print the response from the chatbot in real-time
-    # print('Chatbot response:')
-    resp = ''
+    route = route_query(prompt)
+    print(f"[Router] Query classified as: {route}")
+
+    # 1️. GENERAL knowledge → no retrieval
+    if route == "GENERAL":
+        stream = ollama.chat(
+            model=LANGUAGE_MODEL,
+            messages=[
+                {
+                    'role': 'system',
+                    'content': (
+                        "You are a knowledgeable assistant. "
+                        "Answer naturally and directly. "
+                        "Do not mention internal context or sources."
+                    )
+                },
+                {'role': 'user', 'content': prompt},
+            ],
+            stream=True,
+        )
+
+    # 2️. ELUVIO-specific → pure RAG
+    elif route == "ELUVIO":
+        results = vector_db.similarity_search_with_score(prompt, k=5)
+        stream = augment_llm(prompt, results)
+
+    # 3️. HYBRID → structured answer
+    else:  # HYBRID
+        results = vector_db.similarity_search_with_score(prompt, k=5)
+        stream = augment_llm_hybrid(prompt, results)
+
+    # Collect streaming response
+    resp = ""
     for chunk in stream:
         resp += chunk['message']['content']
 
-
-    return f"You asked: '{prompt}'. This is a mock response. {resp}"
+    return resp
 
 def augment_llm(input_query, retrieved_knowledge):
-    instruction_prompt = f'''You are a helpful chatbot.
-    Use only the following pieces of context to answer the question.
-    Don't make up any new information:
+
+    instruction_prompt = f'''
+    You are an Eluvio product expert helping customers understand the platform.
+    Answer naturally and directly.
+    Do not mention the existence of retrieved context or documents.
+
+    Eluvio context:
     {'\n'.join([f' - {chunk}' for chunk, similarity in retrieved_knowledge])}
     '''
+
     stream = ollama.chat(
-    model=LANGUAGE_MODEL,
-    messages=[
+        model=LANGUAGE_MODEL,
+        messages=[
             {'role': 'system', 'content': instruction_prompt},
             {'role': 'user', 'content': input_query},
         ],
         stream=True,
     )
 
-    print("Query: ", input_query)
-    print('=' * 30, '*' * 10, '=' * 30)
     return stream
+
+def augment_llm_hybrid(input_query, retrieved_knowledge):
+    """
+    Hybrid answer: general knowledge first, then Eluvio-specific
+    """
+
+    instruction_prompt = f"""
+    You are an Eluvio product expert.
+
+    First, briefly explain the general concept needed to answer the question.
+    Then, explain how it specifically relates to Eluvio.
+
+    Use only the Eluvio-related context below for the Eluvio-specific part.
+    Do not invent Eluvio details.
+    Do not mention internal context or documents.
+
+    Eluvio context:
+    {'\n'.join([f' - {chunk}' for chunk, similarity in retrieved_knowledge])}
+    """
+
+    stream = ollama.chat(
+        model=LANGUAGE_MODEL,
+        messages=[
+            {'role': 'system', 'content': instruction_prompt},
+            {'role': 'user', 'content': input_query},
+        ],
+        stream=True,
+    )
+
+    return stream
+
+def route_query(query: str) -> str:
+    """
+    Classify query into: GENERAL, ELUVIO, or HYBRID
+    """
+    router_prompt = f"""
+    Classify the following user query into exactly one category:
+    - GENERAL: general knowledge, not specific to Eluvio
+    - ELUVIO: specifically about Eluvio, its product, team, or technology
+    - HYBRID: general concept + Eluvio-specific usage
+
+    Respond with ONLY one word: GENERAL, ELUVIO, or HYBRID.
+
+    Query: "{query}"
+    """
+
+    response = ollama.chat(
+        model=LANGUAGE_MODEL,
+        messages=[{'role': 'user', 'content': router_prompt}],
+        stream=False,
+    )
+
+    return response['message']['content'].strip().upper()
 
 
 @app.route("/ask", methods=["POST"])
